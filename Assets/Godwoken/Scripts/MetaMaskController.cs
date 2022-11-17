@@ -1,4 +1,6 @@
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using Nethereum.Hex.HexTypes;
 using System.Numerics;
@@ -62,7 +64,12 @@ namespace Godwoken
             StartCoroutine(GetNumberOfExampleNFTsCoroutine(contractAddress, onComplete));
         }
 
-        public IContractTransactionUnityRequest UnityToBlockchainTransaction()
+        public void GetExampleNFTs(string contractAddress, UnityAction<List<Sprite>> onComplete)
+        {
+            StartCoroutine(GetExampleNFTsCoroutine(contractAddress, onComplete));
+        }
+        
+        public IContractTransactionUnityRequest UnityToGodwokenTransaction()
         {
             if (!MetamaskInterop.IsMetamaskAvailable())
             {
@@ -95,7 +102,21 @@ namespace Godwoken
 
         private void ChainUpdate(string chainId)
         {
-            _chainId = new HexBigInteger(chainId).Value;;
+            _chainId = new HexBigInteger(chainId).Value;
+            try
+            {
+                StartCoroutine(GetBlockNumber());
+            }
+            catch(Exception ex)
+            {
+                ThrowError(ex.Message);
+            }
+        }
+
+        private IEnumerator GetBlockNumber()
+        {
+            var blockRequest = new EthBlockNumberUnityRequest(GetUnityRpcRequestClientFactory());
+            yield return blockRequest.SendRequest();
         }
 
         private void NewAccount(string accountAddress)
@@ -113,7 +134,7 @@ namespace Godwoken
                 ThrowError("Metamask not available");
                 return null;
             }
-            return new MetamaskRequestRpcClientFactory(_address, null, 1000);
+            return new MetamaskRequestRpcClientFactory(_address, null, 5000);
         }
         
         private IEnumerator GetNumberOfExampleNFTsCoroutine(string contractAddress, UnityAction<int> onComplete)
@@ -130,7 +151,46 @@ namespace Godwoken
             }
         }
 
-        
+        private IEnumerator GetExampleNFTsCoroutine(string contractAddress, UnityAction<List<Sprite>> onComplete)
+        {
+            var nftsOfUser = new ERC721ExampleUnityRequest(GetAddress(), GetUnityRpcRequestClientFactory());
+            yield return nftsOfUser.GetAllNFTUris(contractAddress, GetAddress());
+            if (nftsOfUser.Exception != null)
+            {
+                yield break;
+            }
+            if (nftsOfUser.Result != null)
+            {
+                var metadataUnityRequest = new ExampleNFTMetadataUnityRequest();
+                yield return metadataUnityRequest.GetAllMetadata(nftsOfUser.Result);
+                if (metadataUnityRequest.Exception != null)
+                {
+                    ThrowError(metadataUnityRequest.Exception.Message);
+                    yield break;
+                }
+
+                if (metadataUnityRequest.Result != null)
+                {
+                    var sprites = new List<Sprite>();
+                    var textureAssigner = new ImageDownloaderTextureAssigner();
+                    foreach (var item in metadataUnityRequest.Result)
+                    {
+                        if (string.IsNullOrEmpty(item.image))
+                        {
+                            continue;
+                        }
+
+                        yield return textureAssigner.DownloadAndSetImageTexture(item.image, sprite =>
+                            {
+                                sprites.Add(sprite);
+                            }
+                        );
+                    }
+
+                    onComplete.Invoke(sprites);
+                }
+            }
+        }
     }
 }
 
